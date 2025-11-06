@@ -210,6 +210,46 @@
             font-weight: 600;
             color: #1e40af;
         }
+
+        /* Watermark styling */
+        .map-watermark {
+            position: fixed;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 6px 16px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            font-size: 13px;
+            font-weight: 500;
+            color: #1e40af;
+            pointer-events: auto;
+            transition: all 0.3s ease;
+        }
+
+        .map-watermark:hover {
+            background-color: rgba(255, 255, 255, 1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            transform: translateX(-50%) translateY(-2px);
+        }
+
+        .map-watermark a {
+            color: #1e40af;
+            text-decoration: none;
+        }
+
+        .map-watermark a:hover {
+            color: #2563eb;
+        }
+
+        @media (max-width: 768px) {
+            .map-watermark {
+                font-size: 11px;
+                padding: 4px 12px;
+            }
+        }
     </style>
 </head>
 
@@ -336,6 +376,14 @@
 
         <!-- Map Container -->
         <div id="map" style="height:100%;width:100%;"></div>
+
+        <!-- Watermark -->
+        <div class="map-watermark">
+            <a href="#" target="_blank" rel="noopener noreferrer">
+                Powered by: Street Mappers
+            </a>
+        </div>
+
 
         <!-- Map Controls - Moved to Bottom Right with enhanced mobile support -->
         <div class="fixed bottom-4 right-4 z-50 flex flex-col space-y-2">
