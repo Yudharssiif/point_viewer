@@ -460,16 +460,22 @@
             function initMap(center, zoom) {
                 // Create map
                 window.map = L.map('map', {
-                    zoomControl: false
+                    zoomControl: false,
+                    minZoom: 2,
+                    maxZoom: 26, // allow zooming to centimeter level
                 });
 
                 // Create layers
                 window.defaultLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: ''
+                    attribution: '',
+                    minZoom: 2,
+                    maxZoom: 26
                 });
 
                 window.satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                    attribution: ''
+                    attribution: '',
+                    minZoom: 2,
+                    maxZoom: 26
                 });
 
                 // Add default layer and set view
