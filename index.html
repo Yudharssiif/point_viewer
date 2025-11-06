@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Point Viewer</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
+    <style>
+        #map {
+            height: 100vh;
+            width: 100%;
+            z-index: 1;
+        }
+
+        .sidebar {
+            transition: all 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        .sidebar.collapsed {
+            transform: translateX(-100%);
+        }
+
+        .control-point-marker {
+            background-color: #3b82f6;
+            border: 2px solid white;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .control-point-marker.selected {
+            background-color: #ef4444;
+            width: 20px;
+            height: 20px;
+        }
+
+        .coordinate-input {
+            transition: all 0.3s ease;
+        }
+
+        .coordinate-input.active {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        .measure-line {
+            stroke: #ef4444;
+            stroke-width: 3;
+            stroke-dasharray: 10, 10;
+        }
+
+        .measure-polygon {
+            fill: rgba(239, 68, 68, 0.2);
+            stroke: #ef4444;
+            stroke-width: 3;
+            stroke-dasharray: 10, 10;
+        }
+
+        .measure-popup {
+            font-weight: bold;
+            background: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Scale Control Styling */
+        .leaflet-control-scale {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 5px 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: left 0.3s ease-in-out;
+        }
+
+        .sidebar:not(.collapsed)~.map-container .leaflet-control-scale {
+            left: calc(16rem + 20px);
+        }
+
+        .leaflet-control-scale-line {
+            border: 2px solid #666;
+            border-top: none;
+            color: #333;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 5px 1px;
+            text-align: center;
+            text-shadow: 1px 1px 0 #fff;
+        }
+
+        .leaflet-control-scale-line:not(:first-child) {
+            border-top: 2px solid #666;
+            border-bottom: none;
+            margin-top: -2px;
+        }
+
+        .tool-active {
+            background-color: #10b981 !important;
+            color: white !important;
+        }
+
+        /* Fixed top bar */
+        .top-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            height: 64px;
+        }
+
+        @media (max-width: 768px) {
+            .top-bar {
+                height: 48px;
+            }
+        }
+
+        /* Map container adjustment for fixed top bar */
+        .map-container {
+            margin-top: 64px;
+            height: calc(100vh - 64px);
+        }
+
+        @media (max-width: 768px) {
+            .map-container {
+                margin-top: 48px;
+                height: calc(100vh - 48px);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+            }
+
+            .sidebar:not(.collapsed)~.map-container {
+                margin-left: 0 !important;
+            }
+
+            .sidebar:not(.collapsed) {
+                transform: translateX(0);
+            }
+        }
+
+        @media (min-width: 769px) {
+            .sidebar.collapsed {
+                transform: translateX(-100%);
+            }
+
+            .sidebar:not(.collapsed)~.map-container {
+                margin-left: 16rem;
+            }
+        }
+
+        .coordinate-tabs {
+            display: flex;
+            border-bottom: 1px solid #e5e7eb;
+            margin-bottom: 12px;
+        }
+
+        .coordinate-tab {
+            flex: 1;
+            padding: 8px 12px;
+            text-align: center;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+
+        .coordinate-tab.active {
+            border-bottom-color: #3b82f6;
+            color: #3b82f6;
+            font-weight: 500;
+        }
+
+        .coordinate-form {
+            display: none;
+        }
+
+        .coordinate-form.active {
+            display: block;
+        }
+
+        /* Hide Leaflet watermark */
+        .leaflet-control-attribution {
+            display: none !important;
+        }
+
+        /* Measurement results styling */
+        .measurement-result {
+            margin-top: 8px;
+            padding: 8px;
+            background: #f0f9ff;
+            border-radius: 4px;
+            border-left: 4px solid #3b82f6;
+        }
+
+        .measurement-value {
+            font-weight: 600;
+            color: #1e40af;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100">
+    <!-- Sidebar -->
+    <div class="sidebar fixed top-0 left-0 h-full w-64 bg-white shadow-lg collapsed">
+        <div class="p-4 border-b border-gray-200 flex justify-between items-center">
+            <h1 class="text-xl font-bold text-blue-600">Street Mappers</h1>
+            <button id="sidebar-toggle" class="text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <!-- Coordinate Entry Section -->
+        <div class="p-4 border-t border-gray-200">
+            <h3 class="font-medium text-gray-700 mb-2">Coordinate Entry</h3>
+
+            <!-- Coordinate Type Tabs -->
+            <div class="coordinate-tabs">
+                <div class="coordinate-tab active" data-tab="arc1960">ARC 1960</div>
+                <div class="coordinate-tab" data-tab="wgs84">WGS84 UTM</div>
+            </div>
+
+            <!-- ARC 1960 Coordinate Form -->
+            <div id="arc1960-form" class="coordinate-form active">
+                <div class="mb-3">
+                    <label class="block text-sm text-gray-600 mb-1">Zone</label>
+                    <select id="arc-zone" class="w-full p-2 border border-gray-300 rounded text-sm">
+                        <option value="35">Zone 35</option>
+                        <option value="36">Zone 36</option>
+                        <option value="37">Zone 37</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="block text-sm text-gray-600 mb-1">Northing (ARC 1960)</label>
+                    <input type="number" id="arc-northing" placeholder="Enter northing"
+                        class="w-full p-2 border border-gray-300 rounded text-sm coordinate-input">
+                </div>
+                <div class="mb-3">
+                    <label class="block text-sm text-gray-600 mb-1">Easting (ARC 1960)</label>
+                    <input type="number" id="arc-easting" placeholder="Enter easting"
+                        class="w-full p-2 border border-gray-300 rounded text-sm coordinate-input">
+                </div>
+                <button id="search-by-arc-coords"
+                    class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 text-sm">
+                    Search by ARC 1960
+                </button>
+            </div>
+
+            <!-- WGS84 UTM Coordinate Form -->
+            <div id="wgs84-form" class="coordinate-form">
+                <div class="mb-3">
+                    <label class="block text-sm text-gray-600 mb-1">Zone</label>
+                    <select id="wgs84-zone" class="w-full p-2 border border-gray-300 rounded text-sm">
+                        <option value="35">Zone 35</option>
+                        <option value="36">Zone 36</option>
+                        <option value="37">Zone 37</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="block text-sm text-gray-600 mb-1">Northing (WGS84 UTM)</label>
+                    <input type="number" id="wgs84-northing" placeholder="Enter northing"
+                        class="w-full p-2 border border-gray-300 rounded text-sm coordinate-input">
+                </div>
+                <div class="mb-3">
+                    <label class="block text-sm text-gray-600 mb-1">Easting (WGS84 UTM)</label>
+                    <input type="number" id="wgs84-easting" placeholder="Enter easting"
+                        class="w-full p-2 border border-gray-300 rounded text-sm coordinate-input">
+                </div>
+                <button id="search-by-wgs84-coords"
+                    class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 text-sm">
+                    Search by WGS84 UTM
+                </button>
+            </div>
+        </div>
+
+        <!-- Measurement Tools Section -->
+        <div class="p-4 border-t border-gray-200">
+            <h3 class="font-medium text-gray-700 mb-2">Measurement Tools</h3>
+            <div class="space-y-2">
+                <button id="distance-measure-btn"
+                    class="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 text-sm flex items-center justify-center">
+                    <i class="fas fa-ruler mr-2"></i> Measure Distance
+                </button>
+                <button id="area-measure-btn"
+                    class="w-full bg-purple-600 text-white py-2 rounded hover:bg-purple-700 text-sm flex items-center justify-center">
+                    <i class="fas fa-draw-polygon mr-2"></i> Measure Area
+                </button>
+                <button id="clear-measurements"
+                    class="w-full bg-gray-200 text-gray-700 py-2 rounded hover:bg-gray-300 text-sm">
+                    Clear Measurements
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Main Content -->
+    <!-- Map Container -->
+    <div class="map-container transition-all duration-300 fixed inset-0 z-0"
+        style="margin-top:64px; height:calc(100vh - 64px); margin-left: 0;">
+        <!-- Fixed Top Navigation -->
+        <div class="top-bar bg-white shadow-sm px-2 md:px-4 flex justify-between items-center">
+            <button id="menu-toggle" class="text-gray-500 hover:text-gray-700 p-2 z-50" title="Toggle Menu">
+                <i class="fas fa-bars text-lg md:text-xl"></i>
+            </button>
+
+            <!-- Company Name -->
+            <div class="text-lg font-semibold text-blue-600 ml-2 hidden md:block">Street Mappers</div>
+
+            <!-- Search Bar -->
+            <div class="flex-1 max-w-2xl mx-2 md:mx-4">
+                <div class="relative">
+                    <input type="text" id="search-input" placeholder="Search for a location..."
+                        class="w-full h-8 md:h-10 px-8 text-sm md:text-base rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <i
+                        class="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm md:text-base"></i>
+                    <div id="search-results"
+                        class="absolute z-50 w-full mt-1 bg-white shadow-lg rounded-lg hidden max-h-60 overflow-y-auto">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Map Container -->
+        <div id="map" style="height:100%;width:100%;"></div>
+
+        <!-- Map Controls - Moved to Bottom Right with enhanced mobile support -->
+        <div class="fixed bottom-4 right-4 z-50 flex flex-col space-y-2">
+            <!-- Zoom Controls - Bottom -->
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden">
+                <button id="zoom-in"
+                    class="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center hover:bg-gray-50 border-b border-gray-100 touch-manipulation">
+                    <i class="fas fa-plus text-gray-700 text-lg"></i>
+                </button>
+                <button id="zoom-out"
+                    class="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center hover:bg-gray-50 touch-manipulation">
+                    <i class="fas fa-minus text-gray-700 text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Current Location - Middle -->
+            <button id="location-btn"
+                class="bg-white w-10 h-10 md:w-12 md:h-12 rounded-lg shadow-lg hover:bg-gray-50 flex items-center justify-center touch-manipulation">
+                <i class="fas fa-location-arrow text-gray-700 text-lg"></i>
+            </button>
+
+            <!-- Map Type Toggle - Top -->
+            <button id="map-toggle"
+                class="bg-white w-10 h-10 md:w-12 md:h-12 rounded-lg shadow-lg hover:bg-gray-50 flex items-center justify-center touch-manipulation">
+                <i class="fas fa-layer-group text-blue-600 text-lg"></i>
+            </button>
+        </div>
+
+        <!-- Measurement Info Dialog -->
+        <div id="measure-info" class="absolute top-20 left-4 z-10 bg-white p-4 rounded-lg shadow-md hidden">
+            <div class="text-sm font-medium text-blue-600 mb-2" id="measure-instruction">Distance Measurement Active
+            </div>
+            <div class="text-xs text-gray-500 mb-1">Click on the map to start measuring</div>
+            <div class="text-xs text-gray-500 mb-3" id="measure-hint">Click points to measure distance. Double-click to
+                finish.</div>
+
+            <!-- Measurement Results -->
+            <div id="measurement-results">
+                <div id="distance-result" class="measurement-result hidden">
+                    <div class="text-xs text-gray-600">Total Distance:</div>
+                    <div class="measurement-value text-sm" id="distance-value">0.00 meters</div>
+                </div>
+                <div id="area-result" class="measurement-result hidden">
+                    <div class="text-xs text-gray-600">Area:</div>
+                    <div class="measurement-value text-sm" id="area-value">0.00 m² (0.0000 ha)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <script>
+        // Define ARC 1960 projection (approximate parameters for Kenya)
+        proj4.defs("EPSG:21035", "+proj=utm +zone=35 +south +ellps=clrk80 +towgs84=-160,-6,-302,0,0,0,0 +units=m +no_defs");
+        proj4.defs("EPSG:21036", "+proj=utm +zone=36 +south +ellps=clrk80 +towgs84=-160,-6,-302,0,0,0,0 +units=m +no_defs");
+        proj4.defs("EPSG:21037", "+proj=utm +zone=37 +south +ellps=clrk80 +towgs84=-160,-6,-302,0,0,0,0 +units=m +no_defs");
+
+        // Define WGS84 UTM projections
+        proj4.defs("EPSG:32735", "+proj=utm +zone=35 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs");
+        proj4.defs("EPSG:32736", "+proj=utm +zone=36 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs");
+        proj4.defs("EPSG:32737", "+proj=utm +zone=37 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs");
+
+        // Initialize map with Kenya bounds
+        const kenyaBounds = [
+            [-4.5, 33.5], // Southwest
+            [5.5, 42.0]   // Northeast
+        ];
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function () {
+
+            // Initialize map and layers
+            function initMap(center, zoom) {
+                // Create map
+                window.map = L.map('map', {
+                    zoomControl: false
+                });
+
+                // Create layers
+                window.defaultLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: ''
+                });
+
+                window.satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: ''
+                });
+
+                // Add default layer and set view
+                defaultLayer.addTo(map);
+                map.setView(center, zoom);
+
+                // Make map globally available
+                window.map = map;
+
+                // Fit map to Kenya bounds after initialization
+                map.fitBounds(kenyaBounds);
+            }
+
+            // Initialize map centered on Kenya
+            initMap([-1.2921, 36.8219], 7);
+            map.fitBounds(kenyaBounds);
+
+            // Add map controls to the map
+            L.control.scale().addTo(map);
+
+            // Map toggle functionality
+            const mapToggle = document.getElementById('map-toggle');
+            let isSatelliteView = false;
+
+            mapToggle.addEventListener('click', function () {
+                if (isSatelliteView) {
+                    map.removeLayer(satelliteLayer);
+                    map.addLayer(defaultLayer);
+                    mapToggle.innerHTML = '<i class="fas fa-layer-group text-blue-600"></i>';
+                } else {
+                    map.removeLayer(defaultLayer);
+                    map.addLayer(satelliteLayer);
+                    mapToggle.innerHTML = '<i class="fas fa-map text-blue-600"></i>';
+                }
+                isSatelliteView = !isSatelliteView;
+            });
+
+            // Zoom controls
+            document.getElementById('zoom-in').addEventListener('click', function () {
+                map.zoomIn();
+            });
+
+            document.getElementById('zoom-out').addEventListener('click', function () {
+                map.zoomOut();
+            });
+
+            // Sidebar functionality
+            const sidebar = document.querySelector('.sidebar');
+            const menuToggle = document.getElementById('menu-toggle');
+            const sidebarToggle = document.getElementById('sidebar-toggle');
+
+            menuToggle.addEventListener('click', function (e) {
+                e.stopPropagation();
+                sidebar.classList.toggle('collapsed');
+                // Update button icon based on sidebar state
+                const icon = this.querySelector('i');
+                if (sidebar.classList.contains('collapsed')) {
+                    icon.classList.remove('fa-times');
+                    icon.classList.add('fa-bars');
+                    document.querySelector('.map-container').style.marginLeft = '0';
+                } else {
+                    icon.classList.remove('fa-bars');
+                    icon.classList.add('fa-times');
+                    document.querySelector('.map-container').style.marginLeft = '16rem';
+                }
+                // Trigger a resize event to update the map
+                window.dispatchEvent(new Event('resize'));
+            });
+
+            sidebarToggle.addEventListener('click', function (e) {
+                e.stopPropagation();
+                sidebar.classList.add('collapsed');
+                const menuIcon = menuToggle.querySelector('i');
+                menuIcon.classList.remove('fa-times');
+                menuIcon.classList.add('fa-bars');
+                document.querySelector('.map-container').style.marginLeft = '0';
+                // Trigger a resize event to update the map
+                window.dispatchEvent(new Event('resize'));
+            });
+
+            // Close sidebar when clicking outside on mobile
+            document.addEventListener('click', function (event) {
+                if (window.innerWidth <= 768 &&
+                    !sidebar.contains(event.target) &&
+                    !menuToggle.contains(event.target) &&
+                    !sidebar.classList.contains('collapsed')) {
+                    sidebar.classList.add('collapsed');
+                    document.querySelector('.map-container').style.marginLeft = '0';
+                    // Trigger a resize event to update the map
+                    window.dispatchEvent(new Event('resize'));
+                }
+            });
+
+            // Coordinate type tabs functionality
+            const coordinateTabs = document.querySelectorAll('.coordinate-tab');
+            const coordinateForms = document.querySelectorAll('.coordinate-form');
+
+            coordinateTabs.forEach(tab => {
+                tab.addEventListener('click', function () {
+                    const tabName = this.getAttribute('data-tab');
+
+                    // Update active tab
+                    coordinateTabs.forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+
+                    // Show corresponding form
+                    coordinateForms.forEach(form => {
+                        form.classList.remove('active');
+                        if (form.id === `${tabName}-form`) {
+                            form.classList.add('active');
+                        }
+                    });
+                });
+            });
+
+            // Helper function to format numbers with commas
+            function formatNumber(number, decimals = 2) {
+                const parts = number.toFixed(decimals).split('.');
+                parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                return parts.join('.');
+            }
+
+            // Search functionality
+            const searchInput = document.getElementById('search-input');
+            const searchResults = document.getElementById('search-results');
+
+            searchInput.addEventListener('input', function () {
+
+                const query = this.value.trim().toLowerCase();
+                if (query.length < 2) {
+                    searchResults.classList.add('hidden');
+                    return;
+                }
+
+                // Check if query is in coordinate format (e.g., "9912345.67, 500123.45")
+                const coordMatch = query.match(/(\d+\.?\d*)[\,\s]+(\d+\.?\d*)/);
+
+                // Initialize empty results array
+                const pointResults = [];
+
+                // Search in locations (using Nominatim API) - only if not coordinate search
+                if (!coordMatch) {
+                    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`)
+                        .then(response => response.json())
+                        .then(locationResults => {
+                            displaySearchResults(pointResults, locationResults);
+                        })
+                        .catch(error => {
+                            console.error('Error fetching location data:', error);
+                            displaySearchResults(pointResults, []);
+                        });
+                } else {
+                    // Handle coordinate search
+                    const northing = parseFloat(coordMatch[1]);
+                    const easting = parseFloat(coordMatch[2]);
+                    const zone = document.getElementById('arc-zone').value;
+
+                    if (!isNaN(northing) && !isNaN(easting)) {
+                        // Convert ARC 1960 to WGS84
+                        const wgs84Coords = convertArc1960ToWGS84(easting, northing, zone);
+
+                        if (wgs84Coords) {
+                            const coordResult = {
+                                type: 'coordinate',
+                                lat: wgs84Coords[1],
+                                lng: wgs84Coords[0],
+                                display_name: `ARC 1960 (Zone ${zone}): ${northing.toFixed(3)}N, ${easting.toFixed(3)}E`
+                            };
+
+                            displaySearchResults(pointResults, [coordResult]);
+                        }
+                    }
+                }
+            });
+
+            function displaySearchResults(pointResults, locationResults) {
+                searchResults.innerHTML = '';
+
+                // We now only display location results since we removed control points
+
+                // Add location results
+                locationResults.slice(0, 5).forEach(location => {
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'p-3 border-b border-gray-200 hover:bg-gray-100 cursor-pointer';
+
+                    if (location.type === 'coordinate') {
+                        resultItem.innerHTML = `
+                            <div class="font-medium">${location.display_name}</div>
+                            <div class="text-sm text-gray-500">Coordinate Location</div>
+                        `;
+                        resultItem.addEventListener('click', function () {
+                            map.setView([location.lat, location.lng], 16);
+                            searchResults.classList.add('hidden');
+                            searchInput.value = '';
+                        });
+                    } else {
+                        resultItem.innerHTML = `
+                            <div class="font-medium">${location.display_name}</div>
+                            <div class="text-sm text-gray-500">Location</div>
+                        `;
+                        resultItem.addEventListener('click', function () {
+                            map.setView([location.lat, location.lon], 13);
+                            searchResults.classList.add('hidden');
+                            searchInput.value = '';
+                        });
+                    }
+
+                    searchResults.appendChild(resultItem);
+                });
+
+                if (pointResults.length > 0 || locationResults.length > 0) {
+                    searchResults.classList.remove('hidden');
+                } else {
+                    searchResults.classList.add('hidden');
+                }
+            }
+
+            // Close search results when clicking outside
+            document.addEventListener('click', function (event) {
+                if (!searchInput.contains(event.target) && !searchResults.contains(event.target)) {
+                    searchResults.classList.add('hidden');
+                }
+            });
+
+            // Location button functionality with simple fallback
+            const locationBtn = document.getElementById('location-btn');
+
+            function handleLocation(position) {
+                const userLocation = [position.coords.latitude, position.coords.longitude];
+                map.setView(userLocation, 16);
+
+                if (window.userLocationMarker) {
+                    map.removeLayer(window.userLocationMarker);
+                }
+
+                window.userLocationMarker = L.marker(userLocation, {
+                    icon: L.divIcon({
+                        className: 'user-location-marker',
+                        html: '<i class="fas fa-map-marker-alt text-blue-600 text-xl"></i>',
+                        iconSize: [24, 24]
+                    })
+                }).addTo(map).bindPopup('Your Location').openPopup();
+            }
+
+            function handleLocationError() {
+                // Fallback to default location
+                map.setView([-6.1659, 39.2026], 13);
+            }
+
+            locationBtn.addEventListener('click', function () {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(handleLocation, handleLocationError, {
+                        enableHighAccuracy: true,
+                        timeout: 5000,
+                        maximumAge: 0
+                    });
+                } else {
+                    handleLocationError();
+                }
+                locationModal.innerHTML = `
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-4">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Find Your Location</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <input type="text" id="location-search" placeholder="Search for a place..." 
+                                   class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="try-geolocation" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                                <i class="fas fa-location-arrow mr-2"></i> Use My Location
+                            </button>
+                            <button id="close-location-modal" class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
+                                Cancel
+                            </button>
+                        </div>
+                        <div id="location-search-results" class="mt-2 max-h-48 overflow-y-auto"></div>
+                    </div>
+                </div>
+            `;
+                document.body.appendChild(locationModal);
+
+                // Location button click handler
+                locationBtn.addEventListener('click', function () {
+                    document.getElementById('location-modal').classList.remove('hidden');
+                });
+
+                // Close modal handler
+                document.getElementById('close-location-modal').addEventListener('click', function () {
+                    document.getElementById('location-modal').classList.add('hidden');
+                });
+
+                // Location search handler
+                let searchTimeout;
+                document.getElementById('location-search').addEventListener('input', function (e) {
+                    clearTimeout(searchTimeout);
+                    const query = e.target.value.trim();
+
+                    if (query.length < 3) {
+                        document.getElementById('location-search-results').innerHTML = '';
+                        return;
+                    }
+
+                    searchTimeout = setTimeout(() => {
+                        fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
+                            .then(response => response.json())
+                            .then(results => {
+                                const resultsContainer = document.getElementById('location-search-results');
+                                resultsContainer.innerHTML = '';
+
+                                results.forEach(result => {
+                                    const div = document.createElement('div');
+                                    div.className = 'p-2 hover:bg-gray-100 cursor-pointer border-b border-gray-200';
+                                    div.textContent = result.display_name;
+                                    div.addEventListener('click', () => {
+                                        const location = [parseFloat(result.lat), parseFloat(result.lon)];
+                                        setUserLocation(location, result.display_name);
+                                        document.getElementById('location-modal').classList.add('hidden');
+                                    });
+                                    resultsContainer.appendChild(div);
+                                });
+                            })
+                            .catch(() => {
+                                const resultsContainer = document.getElementById('location-search-results');
+                                resultsContainer.innerHTML = '<div class="p-2 text-gray-500">No results found</div>';
+                            });
+                    }, 500);
+                });
+
+                // Try geolocation button handler
+                document.getElementById('try-geolocation').addEventListener('click', function () {
+                    if (navigator.geolocation) {
+                        const button = this;
+                        const originalText = button.innerHTML;
+                        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Locating...';
+                        button.disabled = true;
+
+                        navigator.geolocation.getCurrentPosition(
+                            function (position) {
+                                const location = [position.coords.latitude, position.coords.longitude];
+                                setUserLocation(location, 'Your Location');
+                                document.getElementById('location-modal').classList.add('hidden');
+                            },
+                            function (error) {
+                                const searchInput = document.getElementById('location-search');
+                                searchInput.placeholder = "Enter a location manually...";
+                                button.innerHTML = originalText;
+                                button.disabled = false;
+                            },
+                            {
+                                enableHighAccuracy: true,
+                                timeout: 5000,
+                                maximumAge: 0
+                            }
+                        );
+                    }
+                });
+
+                // Function to set user location and marker
+                function setUserLocation(location, label) {
+                    map.setView(location, 16);
+
+                    if (window.userLocationMarker) {
+                        map.removeLayer(window.userLocationMarker);
+                    }
+
+                    window.userLocationMarker = L.marker(location, {
+                        icon: L.divIcon({
+                            className: 'user-location-marker',
+                            html: '<i class="fas fa-map-marker-alt text-blue-600 text-xl"></i>',
+                            iconSize: [24, 24]
+                        })
+                    }).addTo(map)
+                        .bindPopup(label)
+                        .openPopup();
+                }
+            });
+
+            // Coordinate conversion functions
+            function convertArc1960ToWGS84(easting, northing, zone) {
+                try {
+                    // Convert using proj4 with specified zone
+                    const wgs84Coords = proj4(`EPSG:210${zone}`, 'WGS84', [easting, northing]);
+
+                    return wgs84Coords;
+                } catch (error) {
+                    console.error('Coordinate conversion error:', error);
+                    alert('Error converting coordinates. Please check your input values.');
+                    return null;
+                }
+            }
+
+            function convertWGS84UTMToWGS84(easting, northing, zone) {
+                try {
+                    // Convert using proj4 with specified zone
+                    const wgs84Coords = proj4(`EPSG:327${zone}`, 'WGS84', [easting, northing]);
+
+                    return wgs84Coords;
+                } catch (error) {
+                    console.error('Coordinate conversion error:', error);
+                    alert('Error converting coordinates. Please check your input values.');
+                    return null;
+                }
+            }
+
+            function convertWGS84ToArc1960(lng, lat, zone) {
+                try {
+                    // Convert using proj4 with specified zone
+                    const arc1960Coords = proj4('WGS84', `EPSG:210${zone}`, [lng, lat]);
+
+                    return {
+                        easting: arc1960Coords[0],
+                        northing: arc1960Coords[1],
+                        zone: zone
+                    };
+                } catch (error) {
+                    console.error('Coordinate conversion error:', error);
+                    return null;
+                }
+            }
+
+            // Search by ARC 1960 coordinates
+            document.getElementById('search-by-arc-coords').addEventListener('click', function () {
+                const northing = parseFloat(document.getElementById('arc-northing').value);
+                const easting = parseFloat(document.getElementById('arc-easting').value);
+                const zone = document.getElementById('arc-zone').value;
+
+                if (isNaN(northing) || isNaN(easting)) {
+                    alert('Please enter valid northing and easting values.');
+                    return;
+                }
+
+                // Convert ARC 1960 to WGS84
+                const wgs84Coords = convertArc1960ToWGS84(easting, northing, zone);
+
+                if (wgs84Coords) {
+                    map.setView([wgs84Coords[1], wgs84Coords[0]], 16);
+
+                    // Add a temporary marker
+                    if (window.tempCoordMarker) {
+                        map.removeLayer(window.tempCoordMarker);
+                    }
+
+                    window.tempCoordMarker = L.marker([wgs84Coords[1], wgs84Coords[0]], {
+                        icon: L.divIcon({
+                            className: 'temp-coord-marker',
+                            html: '<i class="fas fa-crosshairs text-red-600 text-xl"></i>',
+                            iconSize: [24, 24]
+                        })
+                    }).addTo(map)
+                        .bindPopup(`ARC 1960 (Zone ${zone}): ${northing.toFixed(3)}N, ${easting.toFixed(3)}E`)
+                        .openPopup();
+                }
+            });
+
+            // Search by WGS84 UTM coordinates
+            document.getElementById('search-by-wgs84-coords').addEventListener('click', function () {
+                const northing = parseFloat(document.getElementById('wgs84-northing').value);
+                const easting = parseFloat(document.getElementById('wgs84-easting').value);
+                const zone = document.getElementById('wgs84-zone').value;
+
+                if (isNaN(northing) || isNaN(easting)) {
+                    alert('Please enter valid northing and easting values.');
+                    return;
+                }
+
+                // Convert WGS84 UTM to WGS84
+                const wgs84Coords = convertWGS84UTMToWGS84(easting, northing, zone);
+
+                if (wgs84Coords) {
+                    map.setView([wgs84Coords[1], wgs84Coords[0]], 16);
+
+                    // Add a temporary marker
+                    if (window.tempCoordMarker) {
+                        map.removeLayer(window.tempCoordMarker);
+                    }
+
+                    window.tempCoordMarker = L.marker([wgs84Coords[1], wgs84Coords[0]], {
+                        icon: L.divIcon({
+                            className: 'temp-coord-marker',
+                            html: '<i class="fas fa-crosshairs text-red-600 text-xl"></i>',
+                            iconSize: [24, 24]
+                        })
+                    }).addTo(map)
+                        .bindPopup(`WGS84 UTM (Zone ${zone}): ${northing.toFixed(3)}N, ${easting.toFixed(3)}E`)
+                        .openPopup();
+                }
+            });
+
+            // Highlight coordinate inputs on focus
+            document.querySelectorAll('.coordinate-input').forEach(input => {
+                input.addEventListener('focus', function () {
+                    this.classList.add('active');
+                });
+
+                input.addEventListener('blur', function () {
+                    this.classList.remove('active');
+                });
+            });
+
+            // Measurement Functionality
+            const distanceMeasureBtn = document.getElementById('distance-measure-btn');
+            const areaMeasureBtn = document.getElementById('area-measure-btn');
+            const clearMeasurementsBtn = document.getElementById('clear-measurements');
+            const measureInfo = document.getElementById('measure-info');
+            const measureInstruction = document.getElementById('measure-instruction');
+            const measureHint = document.getElementById('measure-hint');
+            const distanceResult = document.getElementById('distance-result');
+            const areaResult = document.getElementById('area-result');
+            const distanceValue = document.getElementById('distance-value');
+            const areaValue = document.getElementById('area-value');
+
+            let isMeasuring = false;
+            let currentTool = null; // 'distance' or 'area'
+            let measurePoints = [];
+            let measureLine = null;
+            let measurePolygon = null;
+            let measureMarkers = [];
+            let totalDistance = 0;
+            let totalArea = 0;
+
+            distanceMeasureBtn.addEventListener('click', function () {
+                if (!isMeasuring || currentTool !== 'distance') {
+                    // Start distance measurement
+                    startMeasurement('distance');
+                } else {
+                    // Stop measuring
+                    stopMeasurement();
+                }
+            });
+
+            areaMeasureBtn.addEventListener('click', function () {
+                if (!isMeasuring || currentTool !== 'area') {
+                    // Start area measurement
+                    startMeasurement('area');
+                } else {
+                    // Stop measuring and complete area
+                    completeAreaMeasurement();
+                }
+            });
+
+            clearMeasurementsBtn.addEventListener('click', function () {
+                clearMeasurements();
+                if (isMeasuring) {
+                    stopMeasurement();
+                }
+            });
+
+            function startMeasurement(tool) {
+                // If already measuring with a different tool, stop it first
+                if (isMeasuring && currentTool !== tool) {
+                    stopMeasurement();
+                }
+
+                // Start new measurement
+                isMeasuring = true;
+                currentTool = tool;
+
+                // Update UI
+                if (tool === 'distance') {
+                    distanceMeasureBtn.classList.add('tool-active');
+                    areaMeasureBtn.classList.remove('tool-active');
+                    measureInstruction.textContent = 'Distance Measurement Active';
+                    measureHint.textContent = 'Click points to measure distance. Double-click to finish.';
+                } else {
+                    areaMeasureBtn.classList.add('tool-active');
+                    distanceMeasureBtn.classList.remove('tool-active');
+                    measureInstruction.textContent = 'Area Measurement Active';
+                    measureHint.textContent = 'Click points to create polygon. Double-click to complete area.';
+                }
+
+                measureInfo.classList.remove('hidden');
+
+                // Clear any previous measurements
+                clearMeasurements();
+
+                // Change cursor
+                map.getContainer().style.cursor = 'crosshair';
+
+                // Add click event to map
+                map.on('click', onMapClickMeasure);
+                map.on('dblclick', onMapDoubleClick);
+            }
+
+            function onMapClickMeasure(e) {
+                if (!isMeasuring) return;
+
+                const point = e.latlng;
+                measurePoints.push(point);
+
+                // Add marker
+                const marker = L.marker(point, {
+                    icon: L.divIcon({
+                        className: 'measure-marker',
+                        html: '<i class="fas fa-map-pin text-red-600 text-xl"></i>',
+                        iconSize: [24, 24]
+                    })
+                }).addTo(map);
+
+                measureMarkers.push(marker);
+
+                if (currentTool === 'distance') {
+                    // Draw line if we have at least 2 points
+                    if (measurePoints.length >= 2) {
+                        if (measureLine) {
+                            map.removeLayer(measureLine);
+                        }
+
+                        measureLine = L.polyline(measurePoints, {
+                            color: '#ef4444',
+                            weight: 3,
+                            dashArray: '10, 10'
+                        }).addTo(map);
+
+                        // Calculate and display distance
+                        totalDistance = calculateTotalDistance();
+                        updateMeasurementDisplay();
+
+                        // Add distance labels to line segments
+                        addDistanceLabels();
+                    }
+                } else if (currentTool === 'area') {
+                    // Draw polygon if we have at least 3 points
+                    if (measurePoints.length >= 3) {
+                        if (measurePolygon) {
+                            map.removeLayer(measurePolygon);
+                        }
+
+                        measurePolygon = L.polygon(measurePoints, {
+                            color: '#ef4444',
+                            weight: 3,
+                            fillColor: '#ef4444',
+                            fillOpacity: 0.2,
+                            dashArray: '10, 10'
+                        }).addTo(map);
+
+                        // Calculate and display area
+                        totalArea = calculateArea();
+                        updateMeasurementDisplay();
+                    }
+                }
+            }
+
+            // Helper function to format numbers with commas
+            function formatNumber(number, decimals = 2) {
+                const parts = number.toFixed(decimals).split('.');
+                parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                return parts.join('.');
+            }
+
+            function updateMeasurementDisplay() {
+                if (currentTool === 'distance') {
+                    if (totalDistance >= 1000) {
+                        // If distance is 1km or more, show in kilometers
+                        const kilometers = totalDistance / 1000;
+                        distanceValue.textContent = `${formatNumber(kilometers, 3)} km (${formatNumber(totalDistance)} m)`;
+                    } else {
+                        distanceValue.textContent = `${formatNumber(totalDistance)} meters`;
+                    }
+                    distanceResult.classList.remove('hidden');
+                    areaResult.classList.add('hidden');
+                } else if (currentTool === 'area') {
+                    const hectares = totalArea / 10000;
+                    const squareKm = totalArea / 1000000;
+
+                    let displayText = `${formatNumber(totalArea)} m²`;
+
+                    if (totalArea >= 10000) {
+                        // Add hectares if area is 1 hectare or more
+                        displayText += ` (${formatNumber(hectares, 4)} ha`;
+                        if (hectares >= 100) {
+                            // Add square kilometers if area is 1 square km or more
+                            displayText += ` | ${formatNumber(squareKm, 4)} km²`;
+                        }
+                        displayText += ')';
+                    }
+
+                    areaValue.textContent = displayText;
+                    areaResult.classList.remove('hidden');
+                    distanceResult.classList.add('hidden');
+                }
+            } function onMapDoubleClick(e) {
+                if (!isMeasuring) return;
+
+                if (currentTool === 'distance') {
+                    // Finish distance measurement
+                    stopMeasurement();
+                } else if (currentTool === 'area') {
+                    // Complete area measurement (don't stop, allow continuing)
+                    if (measurePoints.length >= 3) {
+                        // Area is already calculated and displayed
+                    }
+                }
+            }
+
+            function completeAreaMeasurement() {
+                if (currentTool === 'area' && measurePoints.length >= 3) {
+                    // Area measurement is complete
+                    stopMeasurement();
+                }
+            }
+
+            function calculateTotalDistance() {
+                let total = 0;
+                for (let i = 1; i < measurePoints.length; i++) {
+                    total += measurePoints[i - 1].distanceTo(measurePoints[i]);
+                }
+                return total;
+            }
+
+            function calculateArea() {
+                if (measurePoints.length < 3) return 0;
+
+                // Use a more reliable area calculation method
+                let area = 0;
+                const n = measurePoints.length;
+
+                for (let i = 0; i < n; i++) {
+                    const j = (i + 1) % n;
+                    area += measurePoints[i].lng * measurePoints[j].lat;
+                    area -= measurePoints[j].lng * measurePoints[i].lat;
+                }
+
+                area = Math.abs(area) / 2;
+
+                // Convert from degrees to meters (approximate)
+                // This is a simplified conversion - for more accuracy, use a proper projection
+                const centerLat = measurePoints.reduce((sum, point) => sum + point.lat, 0) / n;
+                const latLength = 111320; // meters per degree latitude
+                const lngLength = 111320 * Math.cos(centerLat * Math.PI / 180); // meters per degree longitude
+
+                return area * latLength * lngLength;
+            }
+
+            function addDistanceLabels() {
+                // Remove existing labels
+                measureMarkers.forEach(marker => {
+                    if (marker._distanceLabel) {
+                        map.removeLayer(marker._distanceLabel);
+                    }
+                });
+
+                // Add labels for each segment
+                for (let i = 1; i < measurePoints.length; i++) {
+                    const start = measurePoints[i - 1];
+                    const end = measurePoints[i];
+                    const distance = start.distanceTo(end);
+
+                    // Calculate midpoint for label placement
+                    const midLat = (start.lat + end.lat) / 2;
+                    const midLng = (start.lng + end.lng) / 2;
+
+                    const label = L.marker([midLat, midLng], {
+                        icon: L.divIcon({
+                            className: 'measure-popup',
+                            html: `<div>${distance.toFixed(2)} m</div>`,
+                            iconSize: [80, 30],
+                            className: 'measure-label'
+                        }),
+                        interactive: false
+                    }).addTo(map);
+
+                    // Store reference to remove later
+                    measureMarkers[i]._distanceLabel = label;
+                }
+            }
+
+            function clearMeasurements() {
+                // Remove line
+                if (measureLine) {
+                    map.removeLayer(measureLine);
+                    measureLine = null;
+                }
+
+                // Remove polygon
+                if (measurePolygon) {
+                    map.removeLayer(measurePolygon);
+                    measurePolygon = null;
+                }
+
+                // Remove markers and labels
+                measureMarkers.forEach(marker => {
+                    map.removeLayer(marker);
+                    if (marker._distanceLabel) {
+                        map.removeLayer(marker._distanceLabel);
+                    }
+                });
+
+                // Reset arrays
+                measurePoints = [];
+                measureMarkers = [];
+                totalDistance = 0;
+                totalArea = 0;
+
+                // Clear display
+                distanceResult.classList.add('hidden');
+                areaResult.classList.add('hidden');
+            }
+
+            function stopMeasurement() {
+                isMeasuring = false;
+                currentTool = null;
+                distanceMeasureBtn.classList.remove('tool-active');
+                areaMeasureBtn.classList.remove('tool-active');
+                measureInfo.classList.add('hidden');
+                map.getContainer().style.cursor = '';
+                map.off('click', onMapClickMeasure);
+                map.off('dblclick', onMapDoubleClick);
+            }
+        });
+    </script>
+</body>
+
+</html>
